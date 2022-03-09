@@ -1,2 +1,2 @@
 # Resistance View
-View predicted map of chemical resistance in insect pests
+Predicted map of chemical resistance in arthropod pests in Australia
