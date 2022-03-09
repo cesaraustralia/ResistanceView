@@ -2,7 +2,7 @@ library(tidyverse)
 library(terra)
 library(sf)
 library(dismo)
-library(spatstat.core)
+# library(spatstat.core)
 
 
 # read the data -----------------------------------------------------------
@@ -14,7 +14,11 @@ pyre_sp <- rast("spatial_data/pyre_usage.tif") %>%
   setNames("selection")
 names(rc_proj)
 
-r <- c(rc_proj[[c(4,8,18,19)]], agri, pyre_sp)
+# log transform precipitation layers then combine
+r <- rc_proj[[c(18,19)]] %>% 
+  # log() %>% 
+  # setNames(paste0("log_", names(rc_proj)[c(18,19)])) %>% 
+  c(rc_proj[[c(4,8)]], ., agri, pyre_sp)
 plot(r)
 
 # read RLEM resistance data
@@ -28,7 +32,7 @@ rlem_res <- read_csv("data/resist_data.csv") %>%
 rlem_res
 
 plot(r[[1]])
-plot(st_geometry(rlem_data), add = TRUE)
+plot(st_geometry(rlem_res), add = TRUE)
 
 # read the RLEM distribution data
 rlem_dis <- read.csv("data/h_destructor.csv") %>% 
@@ -38,10 +42,6 @@ rlem_dis <- read.csv("data/h_destructor.csv") %>%
 
 # combine the two data
 rlem_data <- bind_rows(rlem_res, rlem_dis)
-
-plot(st_geometry(rlem_res), axes = TRUE)
-plot(st_geometry(rlem_dis), axes = TRUE)
-plot(st_geometry(rlem_data), axes = TRUE)
 
 plot(r[[1]])
 plot(rlem_data["resistance"], add = TRUE)
@@ -54,6 +54,7 @@ training <- terra::extract(r, vect(rlem_data)) %>%
 
 str(training)
 summary(training)
+table(training$resistance)
 
 training[which(is.na(training$bio_04)), ]
 
@@ -65,6 +66,7 @@ plot(st_geometry(rlem_data[which(is.na(training$bio_04)), ]), add = TRUE)
 prNum <- as.numeric(table(training$resistance)["1"])
 bgNum <- as.numeric(table(training$resistance)["0"])
 wt <- ifelse(training$resistance == 1, 1, prNum / bgNum)
+table(wt)
 
 brt <- gbm.step(
   data = training,
@@ -80,18 +82,38 @@ brt <- gbm.step(
   site.weights = wt
 )
 
-rlem_pred <- predict(r, brt, n.trees = brt$gbm.call$best.trees, type = "response")
-plot(rlem_pred)
+
+# resample the maps to make predictions faster; for visualization
+# for selection pressure 'sum' might makes more sense
+rr <- terra::aggregate(r, fact = 5, fun = "mean")
+
+# predict with raster package due to issues with terra::predict
+rlem_pred <- raster::predict(object = raster::stack(rr),
+                             model = brt,
+                             n.trees = brt$gbm.call$best.trees,
+                             # cores = 8,
+                             progress = "text",
+                             filename = "predictions/rlem_resistance.tif",
+                             overwrite = TRUE,
+                             type = "response")
+
+plot(rlem_pred, main = "RLEM resistance prediction")
 
 
 # visualisation -----------------------------------------------------------
+# project rasters for plotting
+reddleg_pred <- terra::project(x = rast(rlem_pred), y = "epsg:4326") %>%
+  as.data.frame(xy = TRUE, na.rm = TRUE) %>% 
+  setNames(c("x", "y", "resistance"))
 
-reddleg_pred <- as.data.frame(rlem_pred, xy = TRUE)
-
-ggplot(data = reddleg_pred, aes(x = x, y = y, fill = pred)) +
+# plot the resistance
+ggplot(data = reddleg_pred, aes(x = x, y = y, fill = resistance)) +
   geom_raster() +
-  viridis::scale_fill_viridis(option = "A", direction = 1) +
-  them_classic()
+  # viridis::scale_fill_viridis(option = "A", direction = 1) +
+  scale_fill_gradientn(colours = terrain.colors(30, rev = TRUE)) +
+  theme_classic() +
+  coord_sf(crs = 4326) +
+  labs(x = "Longitude", y = "Latitude", fill = "Resistance \nLikelihood")
 
 
 
