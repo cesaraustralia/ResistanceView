@@ -5,7 +5,7 @@ landuse <- terra::rast("../GIS_data/geotiff_clum_50m1220m/clum_50m1220m.tif")
 agri_codes <- function(x){
   # codes for agriculature classes
   code <- c(
-    # dryland and irrigaed cropping
+    # dryland and irrigated cropping
     330, 331, 332, 333, 334, 335, 336,
     337, 338, 430, 431, 432, 433, 434, 
     435, 436, 437, 438,
