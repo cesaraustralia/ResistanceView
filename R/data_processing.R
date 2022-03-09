@@ -108,7 +108,7 @@ names(agri_1km) <- "agriculture"
 plot(c(rc_proj[[1:3]], agri_1km))
 
 
-# Chemical usage ----------------------------------------------------------
+# chemical usage ----------------------------------------------------------
 # estimates of pyrethoid usage
 load(file = "spatial_data/SP_hires.Rdata")
 
