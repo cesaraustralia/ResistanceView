@@ -3,6 +3,7 @@ library(patchwork)
 library(terra)
 library(sf)
 library(dismo)
+library(mgcv)
 # library(spatstat.core)
 
 
@@ -26,7 +27,7 @@ plot(r)
 rlem_res <- read_csv("data/resist_data.csv") %>% 
   dplyr::filter(SPECIES == "Halotydeus destructor") %>% 
   dplyr::select(species = SPECIES, year = YEAR, region = REGION, chems = `CHEM.GROUP`, LONG, LAT) %>% 
-  filter(chems == "Pyrethroids, Pyrethrins") %>% 
+  filter(chems %in% c("Organophosphates", "Pyrethroids, Pyrethrins")) %>% 
   st_as_sf(coords = c("LONG", "LAT"), crs = 4326) %>%
   st_transform(crs = terra::crs(agri)) %>% 
   mutate(resistance = 1)
@@ -40,7 +41,8 @@ plot(st_geometry(rlem_res), add = TRUE)
 rlem_dis <- read.csv("data/h_destructor.csv") %>% 
   st_as_sf(coords = c("x", "y"), crs = 4326) %>%
   st_transform(crs = terra::crs(agri)) %>% 
-  mutate(resistance = 0)
+  mutate(resistance = 0,
+         chems = sample(unique(rlem_res$chems), nrow(.), replace = TRUE))
 
 # combine the two data
 rlem_data <- bind_rows(rlem_res, rlem_dis)
@@ -49,8 +51,10 @@ plot(r[[1]])
 plot(rlem_data["resistance"], add = TRUE)
 
 # extracting raster values ------------------------------------------------
+# rlem_data %>% filter(chems == "Organophosphates" | resistance == 0)
 training <- terra::extract(r, vect(rlem_data)) %>% 
-  mutate(resistance  = rlem_data$resistance) %>% 
+  mutate(resistance  = rlem_data$resistance,
+         chems = rlem_data$chems) %>% 
   dplyr::select(-ID) %>% 
   drop_na("agri")
 
@@ -64,11 +68,16 @@ training[which(is.na(training$bio_04)), ]
 # plot(st_geometry(rlem_data[which(is.na(training$bio_04)), ]), add = TRUE)
 
 # modelling ---------------------------------------------------------------
+## BRT modelling
 # calculating the case weights
 prNum <- as.numeric(table(training$resistance)["1"])
 bgNum <- as.numeric(table(training$resistance)["0"])
 wt <- ifelse(training$resistance == 1, 1, prNum / bgNum)
 table(wt)
+
+# get presences with Organophosphates and all backgrounds
+training <- training %>% 
+  filter(chems == "Organophosphates" | resistance == 0)
 
 brt <- gbm.step(
   data = training,
@@ -117,6 +126,45 @@ rlem_pred <- raster::predict(object = raster::stack(rr),
 plot(rlem_pred, main = "RLEM resistance prediction")
 
 
+
+## GAM modelling
+# calculating the case weights
+prNum <- as.numeric(table(training$resistance)["1"])
+bgNum <- as.numeric(table(training$resistance)["0"])
+wt <- ifelse(training$resistance == 1, 1, prNum / bgNum)
+table(wt)
+
+training$chems <- as.factor(training$chems)
+
+form <- resistance ~ s(chems, bs = "re") +
+                     s(bio_04) + 
+                     s(bio_08) + 
+                     s(bio_18) +
+                     s(bio_19) +
+                     s(agri) +
+                     s(selection)
+
+gm <- mgcv::gam(formula = as.formula(form), 
+                data = training,
+                family = binomial(link = "logit"),
+                weights = wt,
+                method = "REML")
+
+gratia::draw(gm, trasfom = plogis)
+
+# predict with raster package due to issues with terra::predict
+# "Pyrethroids, Pyrethrins"
+# "Organophosphates"
+rlem_pred2 <- raster::predict(object = raster::stack(rr),
+                              model = gm,
+                              const = data.frame(chems = "Pyrethroids, Pyrethrins"),
+                              progress = "text",
+                              filename = "predictions/rlem_res_gm_pyr.tif",
+                              overwrite = TRUE,
+                              type = "response")
+
+plot(rlem_pred2)
+
 # visualisation -----------------------------------------------------------
 # read AU states
 states <- st_read("spatial_data/aus_states.gpkg") %>% 
@@ -133,7 +181,8 @@ g1 <- ggplot(data = reddleg_pred, aes(x = x, y = y, fill = resistance)) +
   geom_raster() +
   # viridis::scale_fill_viridis(option = "A", direction = 1) +
   scale_fill_gradientn(colours = terrain.colors(30, rev = TRUE)) +
-  geom_sf(data = states, alpha = 0.5, col = "gray70", inherit.aes = FALSE) +
+  geom_sf(data = states, alpha = 0.2,
+          fill = NA, col = "gray80", inherit.aes = FALSE) +
   theme_minimal() +
   coord_sf(crs = st_crs(rlem_data)) +
   labs(x = "Longitude", y = "Latitude", fill = "Resistance \nLikelihood")
@@ -141,7 +190,8 @@ g1
 
 # plot the resistance points
 g2 <- ggplot(data = reddleg_pred, aes(x = x, y = y)) +
-  geom_raster(fill = "gray70") +
+  # geom_raster(fill = "gray70") +
+  geom_sf(data = states, alpha = 1, col = "gray80", inherit.aes = FALSE) +
   geom_sf(data = rlem_res, alpha = 0.6, col = "blue", inherit.aes = FALSE) +
   theme_minimal() +
   coord_sf(crs = st_crs(rlem_data)) +
@@ -173,6 +223,16 @@ ggplot(data = reddleg_pred, aes(x = x, y = y)) +
   labs(x = "Longitude", y = "Latitude")
 
 
+
+
+read_csv("data/resist_data.csv") %>% 
+  dplyr::filter(SPECIES == "Myzus persicae") %>% 
+  dplyr::select(species = SPECIES, year = YEAR, region = REGION, chems = `CHEM.GROUP`, LONG, LAT) %>% 
+  # pull(chems)
+  filter(chems == "Organophosphates") %>% 
+  st_as_sf(coords = c("LONG", "LAT"), crs = 4326) %>%
+  st_transform(crs = terra::crs(agri)) %>% 
+  mutate(resistance = 1)
 
 
 
