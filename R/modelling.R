@@ -144,17 +144,17 @@ form <- resistance ~ s(chems, bs = "re") +
                      s(agri) +
                      s(selection)
 
-gm <- mgcv::gam(formula = as.formula(form), 
-                data = training,
-                family = binomial(link = "logit"),
-                weights = wt,
-                method = "REML")
+gm_rlem <- mgcv::gam(formula = as.formula(form), 
+                     data = training,
+                     family = binomial(link = "logit"),
+                     weights = wt,
+                     method = "REML")
 
 gratia::draw(gm, trasfom = plogis)
 
 # predict with raster package due to issues with terra::predict
 rlem_gm_pyr <- raster::predict(object = raster::stack(rr),
-                               model = gm,
+                               model = gpa_data,
                                const = data.frame(chems = "Pyrethroids, Pyrethrins"),
                                # re.form = "Pyrethroids, Pyrethrins",
                                progress = "text",
@@ -165,7 +165,7 @@ rlem_gm_pyr <- raster::predict(object = raster::stack(rr),
 plot(rlem_gm_pyr)
 
 rlem_gm_org <- raster::predict(object = raster::stack(rr),
-                               model = gm,
+                               model = gpa_data,
                                const = data.frame(chems = "Organophosphates"),
                                # re.form = "Organophosphates",
                                progress = "text",
@@ -181,13 +181,21 @@ states <- st_read("spatial_data/aus_states.gpkg") %>%
   st_crop(xmin = 110, ymin = -45, xmax = 155, ymax = -7)
 
 # project rasters for plotting
-reddleg_pred <- rast(rlem_pred) %>% 
+reddleg_pred1 <- rast(rlem_gm_pyr) %>% 
   # terra::project(x = ., y = "epsg:4326") %>%
   as.data.frame(xy = TRUE, na.rm = TRUE) %>% 
-  setNames(c("x", "y", "resistance"))
+  setNames(c("x", "y", "resistance")) %>% 
+  mutate(SPECIES = "RLEM",
+         CHEM_GROUP = "Pyrethroids, Pyrethrins")
+# project rasters for plotting
+reddleg_pred2 <- rast(rlem_gm_org) %>% 
+  as.data.frame(xy = TRUE, na.rm = TRUE) %>% 
+  setNames(c("x", "y", "resistance")) %>% 
+  mutate(SPECIES = "RLEM",
+         CHEM_GROUP = "Organophosphates")
 
 # plot the resistance prediction
-g1 <- ggplot(data = reddleg_pred, aes(x = x, y = y, fill = resistance)) +
+ggplot(data = reddleg_pred, aes(x = x, y = y, fill = resistance)) +
   geom_raster() +
   # viridis::scale_fill_viridis(option = "A", direction = 1) +
   scale_fill_gradientn(colours = terrain.colors(30, rev = TRUE)) +
@@ -196,10 +204,10 @@ g1 <- ggplot(data = reddleg_pred, aes(x = x, y = y, fill = resistance)) +
   theme_minimal() +
   coord_sf(crs = st_crs(rlem_data)) +
   labs(x = "Longitude", y = "Latitude", fill = "Resistance \nLikelihood")
-g1
+
 
 # plot the resistance points
-g2 <- ggplot(data = reddleg_pred, aes(x = x, y = y)) +
+ggplot(data = reddleg_pred, aes(x = x, y = y)) +
   # geom_raster(fill = "gray70") +
   geom_sf(data = states, alpha = 1, col = "gray80", inherit.aes = FALSE) +
   geom_sf(data = rlem_res, alpha = 0.6, col = "blue", inherit.aes = FALSE) +
@@ -214,35 +222,186 @@ g1 + g2
 
 
 # GPA resistance data -----------------------------------------------------
-gpa_res <- read_csv("data/GPA_resistance_database_Aug162021_Roozbeh.csv") %>% 
+# the GPA resistance data from the database
+gpa_res <- read_csv("data/resist_data.csv") %>% 
+  dplyr::filter(SPECIES == "Myzus persicae") %>% 
+  dplyr::select(species = SPECIES, year = YEAR, region = REGION, chems = `CHEM.GROUP`, LONG, LAT) %>% 
+  filter(chems %in% c("Organophosphates", "Pyrethroids, Pyrethrins")) %>% 
+  st_as_sf(coords = c("LONG", "LAT"), crs = 4326) %>%
+  st_transform(crs = terra::crs(agri)) %>% 
+  mutate(resistance = 1)
+
+nrow(gpa_res)
+plot(st_geometry(gpa_res))
+
+
+# GPA distribution data
+gpa_dis <- read_csv("data/GPA_resistance_database_Aug162021_Roozbeh.csv") %>% 
   filter(COUNTRY == "Australia") %>% 
   drop_na(LATITUDE) %>% 
   st_as_sf(coords = c("LONGITUDE", "LATITUDE"), crs = 4326) %>%
-  st_transform(crs = terra::crs(agri))
+  st_transform(crs = terra::crs(agri)) %>% 
+  mutate(resistance = 0,
+         chems = sample(unique(gpa_res$chems), nrow(.), replace = TRUE))
 
-names(gpa_res)
-nrow(gpa_res)
+names(gpa_dis)
+nrow(gpa_dis)
 
-plot(gpa_res)
+plot(st_geometry(gpa_dis))
 
 ggplot(data = reddleg_pred, aes(x = x, y = y)) +
   geom_raster(fill = "gray70") +
-  geom_sf(data = gpa_res, alpha = 0.6, col = "blue", inherit.aes = FALSE) +
+  geom_sf(data = gpa_dis, alpha = 0.6, col = "red", inherit.aes = FALSE) +
   theme_minimal() +
   coord_sf(crs = st_crs(gpa_res)) +
   labs(x = "Longitude", y = "Latitude")
 
 
+# combine the two data
+gpa_data <- bind_rows(gpa_res, gpa_dis)
+
+# plot(r[[1]])
+plot(gpa_data["resistance"])
+
+# extracting raster values ------------------------------------------------
+# rlem_data %>% filter(chems == "Organophosphates" | resistance == 0)
+training_pga <- terra::extract(r, vect(gpa_data)) %>% 
+  mutate(resistance  = gpa_data$resistance,
+         chems = gpa_data$chems) %>% 
+  dplyr::select(-ID) %>% 
+  drop_na("agri")
+
+str(training_pga)
+summary(training_pga)
+table(training_pga$resistance)
+
+training_pga[which(is.na(training_pga$bio_04)), ]
+
+# plot(r[[1]])
+# plot(st_geometry(rlem_data[which(is.na(training$bio_04)), ]), add = TRUE)
 
 
-read_csv("data/resist_data.csv") %>% 
-  dplyr::filter(SPECIES == "Myzus persicae") %>% 
-  dplyr::select(species = SPECIES, year = YEAR, region = REGION, chems = `CHEM.GROUP`, LONG, LAT) %>% 
-  # pull(chems)
-  filter(chems == "Organophosphates") %>% 
-  st_as_sf(coords = c("LONG", "LAT"), crs = 4326) %>%
-  st_transform(crs = terra::crs(agri)) %>% 
-  mutate(resistance = 1)
+# modelling ---------------------------------------------------------------
+## GAM modelling
+# calculating the case weights
+prNum <- as.numeric(table(training_pga$resistance)["1"])
+bgNum <- as.numeric(table(training_pga$resistance)["0"])
+wt <- ifelse(training_pga$resistance == 1, 1, prNum / bgNum)
+table(wt)
+
+training_pga$chems <- as.factor(training_pga$chems)
+
+form_gpa <- resistance ~ s(chems, bs = "re") +
+  s(bio_04) + 
+  s(bio_08) + 
+  s(bio_18) +
+  s(bio_19) +
+  s(agri) +
+  s(selection)
+
+gm_gpa <- mgcv::gam(formula = as.formula(form_gpa), 
+                    data = training_pga,
+                    family = binomial(link = "logit"),
+                    weights = wt,
+                    method = "REML")
+
+gratia::draw(gm, trasfom = plogis)
+
+# predict with raster package due to issues with terra::predict
+gpa_gm_pyr <- raster::predict(object = raster::stack(rr),
+                              model = gm_gpa,
+                              const = data.frame(chems = "Pyrethroids, Pyrethrins"),
+                              # re.form = "Pyrethroids, Pyrethrins",
+                              progress = "text",
+                              filename = "predictions/gpa_res_gm_pyr.tif",
+                              overwrite = TRUE,
+                              type = "response")
+
+plot(gpa_gm_pyr)
+
+gpa_gm_org <- raster::predict(object = raster::stack(rr),
+                              model = gm_gpa,
+                              const = data.frame(chems = "Organophosphates"),
+                              # re.form = "Organophosphates",
+                              progress = "text",
+                              filename = "predictions/gpa_res_gm_org.tif",
+                              overwrite = TRUE,
+                              type = "response")
+
+plot(gpa_gm_org)
+
+
+# visualisation -----------------------------------------------------------
+# read AU states
+states <- st_read("spatial_data/aus_states.gpkg") %>% 
+  st_crop(xmin = 110, ymin = -45, xmax = 155, ymax = -7)
+
+# project rasters for plotting
+gpa_pred1 <- rast(gpa_gm_pyr) %>% 
+  # terra::project(x = ., y = "epsg:4326") %>%
+  as.data.frame(xy = TRUE, na.rm = TRUE) %>% 
+  setNames(c("x", "y", "resistance")) %>% 
+  mutate(SPECIES = "GPA",
+         CHEM_GROUP = "Pyrethroids, Pyrethrins")
+
+
+# plot the resistance prediction
+ggplot(data = gpa_pred1, aes(x = x, y = y, fill = resistance)) +
+  geom_raster() +
+  # viridis::scale_fill_viridis(option = "A", direction = 1) +
+  scale_fill_gradientn(colours = terrain.colors(30, rev = TRUE)) +
+  geom_sf(data = states, alpha = 0.2,
+          fill = NA, col = "gray80", inherit.aes = FALSE) +
+  theme_minimal() +
+  coord_sf(crs = st_crs(gpa_data)) +
+  labs(x = "Longitude", y = "Latitude", fill = "Resistance \nLikelihood")
+
+
+# project rasters for plotting
+gpa_pred2 <- rast(gpa_gm_org) %>% 
+  # terra::project(x = ., y = "epsg:4326") %>%
+  as.data.frame(xy = TRUE, na.rm = TRUE) %>% 
+  setNames(c("x", "y", "resistance")) %>% 
+  mutate(SPECIES = "GPA",
+         CHEM_GROUP = "Organophosphates")
+
+
+
+# prediction of all models ------------------------------------------------
+
+pred_all <- bind_rows(reddleg_pred1, reddleg_pred2, gpa_pred1, gpa_pred2)
+
+# plot the resistance prediction of all models
+ggplot(data = pred_all, aes(x = x, y = y, fill = resistance)) +
+  geom_raster() +
+  facet_wrap(SPECIES ~ CHEM_GROUP) +
+  # viridis::scale_fill_viridis(option = "A", direction = 1) +
+  scale_fill_gradientn(colours = terrain.colors(30, rev = TRUE)) +
+  geom_sf(data = states, alpha = 0.2,
+          fill = NA, col = "gray80", inherit.aes = FALSE) +
+  theme_minimal() +
+  coord_sf(crs = st_crs(gpa_data)) +
+  labs(x = "Longitude", y = "Latitude", fill = "Resistance \nLikelihood")
+
+ggsave(
+  filename = "resistance_all.jpg",
+  width = 2300,
+  height = 2100,
+  units = "px",
+  dpi = 300
+)
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
