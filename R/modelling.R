@@ -153,17 +153,27 @@ gm <- mgcv::gam(formula = as.formula(form),
 gratia::draw(gm, trasfom = plogis)
 
 # predict with raster package due to issues with terra::predict
-# "Pyrethroids, Pyrethrins"
-# "Organophosphates"
-rlem_pred2 <- raster::predict(object = raster::stack(rr),
-                              model = gm,
-                              const = data.frame(chems = "Pyrethroids, Pyrethrins"),
-                              progress = "text",
-                              filename = "predictions/rlem_res_gm_pyr.tif",
-                              overwrite = TRUE,
-                              type = "response")
+rlem_gm_pyr <- raster::predict(object = raster::stack(rr),
+                               model = gm,
+                               const = data.frame(chems = "Pyrethroids, Pyrethrins"),
+                               # re.form = "Pyrethroids, Pyrethrins",
+                               progress = "text",
+                               filename = "predictions/rlem_res_gm_pyr.tif",
+                               overwrite = TRUE,
+                               type = "response")
 
-plot(rlem_pred2)
+plot(rlem_gm_pyr)
+
+rlem_gm_org <- raster::predict(object = raster::stack(rr),
+                               model = gm,
+                               const = data.frame(chems = "Organophosphates"),
+                               # re.form = "Organophosphates",
+                               progress = "text",
+                               filename = "predictions/rlem_res_gm_org.tif",
+                               overwrite = TRUE,
+                               type = "response")
+
+plot(rlem_gm_org)
 
 # visualisation -----------------------------------------------------------
 # read AU states
