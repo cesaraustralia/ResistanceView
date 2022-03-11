@@ -368,7 +368,7 @@ gpa_pred2 <- rast(gpa_gm_org) %>%
 
 
 # prediction of all models ------------------------------------------------
-
+# combine all the predictions
 pred_all <- bind_rows(reddleg_pred1, reddleg_pred2, gpa_pred1, gpa_pred2)
 
 # plot the resistance prediction of all models
@@ -376,13 +376,16 @@ ggplot(data = pred_all, aes(x = x, y = y, fill = resistance)) +
   geom_raster() +
   facet_wrap(SPECIES ~ CHEM_GROUP) +
   # viridis::scale_fill_viridis(option = "A", direction = 1) +
-  scale_fill_gradientn(colours = terrain.colors(30, rev = TRUE)) +
+  scale_fill_gradientn(colours = terrain.colors(30, rev = TRUE),
+                       # breaks = c(0, 0.5, 1),
+                       limits = c(0, 1)) +
   geom_sf(data = states, alpha = 0.2,
           fill = NA, col = "gray80", inherit.aes = FALSE) +
   theme_minimal() +
   coord_sf(crs = st_crs(gpa_data)) +
   labs(x = "Longitude", y = "Latitude", fill = "Resistance \nLikelihood")
 
+# save maps
 ggsave(
   filename = "resistance_all.jpg",
   width = 2300,
@@ -392,10 +395,23 @@ ggsave(
 )
 
 
+# plot mean prediction
+pred_mean <- raster::stack(gpa_gm_org, gpa_gm_pyr, rlem_gm_org, rlem_gm_pyr) %>% 
+  mean() %>% 
+  # rast(gpa_gm_org) %>% 
+  as.data.frame(xy = TRUE, na.rm = TRUE) %>% 
+  setNames(c("x", "y", "resistance"))
 
-
-
-
+ggplot(data = pred_mean, aes(x = x, y = y, fill = resistance)) +
+  geom_raster() +
+  scale_fill_gradientn(colours = terrain.colors(30, rev = TRUE),
+                       # breaks = c(0, 0.5, 1),
+                       limits = c(0, 1)) +
+  geom_sf(data = states, alpha = 0.2,
+          fill = NA, col = "gray80", inherit.aes = FALSE) +
+  theme_minimal() +
+  coord_sf(crs = st_crs(gpa_data)) +
+  labs(x = "Longitude", y = "Latitude", fill = "Resistance \nLikelihood")
 
 
 
