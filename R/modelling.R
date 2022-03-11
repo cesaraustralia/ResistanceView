@@ -338,12 +338,10 @@ states <- st_read("spatial_data/aus_states.gpkg") %>%
 
 # project rasters for plotting
 gpa_pred1 <- rast(gpa_gm_pyr) %>% 
-  # terra::project(x = ., y = "epsg:4326") %>%
   as.data.frame(xy = TRUE, na.rm = TRUE) %>% 
   setNames(c("x", "y", "resistance")) %>% 
   mutate(SPECIES = "GPA",
          CHEM_GROUP = "Pyrethroids, Pyrethrins")
-
 
 # plot the resistance prediction
 ggplot(data = gpa_pred1, aes(x = x, y = y, fill = resistance)) +
@@ -357,9 +355,9 @@ ggplot(data = gpa_pred1, aes(x = x, y = y, fill = resistance)) +
   labs(x = "Longitude", y = "Latitude", fill = "Resistance \nLikelihood")
 
 
+
 # project rasters for plotting
 gpa_pred2 <- rast(gpa_gm_org) %>% 
-  # terra::project(x = ., y = "epsg:4326") %>%
   as.data.frame(xy = TRUE, na.rm = TRUE) %>% 
   setNames(c("x", "y", "resistance")) %>% 
   mutate(SPECIES = "GPA",
@@ -402,7 +400,7 @@ pred_mean <- raster::stack(gpa_gm_org, gpa_gm_pyr, rlem_gm_org, rlem_gm_pyr) %>%
   as.data.frame(xy = TRUE, na.rm = TRUE) %>% 
   setNames(c("x", "y", "resistance"))
 
-ggplot(data = pred_mean, aes(x = x, y = y, fill = resistance)) +
+g1 <- ggplot(data = pred_mean, aes(x = x, y = y, fill = resistance)) +
   geom_raster() +
   scale_fill_gradientn(colours = terrain.colors(30, rev = TRUE),
                        # breaks = c(0, 0.5, 1),
@@ -412,15 +410,26 @@ ggplot(data = pred_mean, aes(x = x, y = y, fill = resistance)) +
   theme_minimal() +
   coord_sf(crs = st_crs(gpa_data)) +
   labs(x = "Longitude", y = "Latitude", fill = "Resistance \nLikelihood")
+g1
+
+g2 <- agri %>% 
+  terra::aggregate(fact = 5, fun = "mean") %>% 
+  as.data.frame(xy = TRUE, na.rm = TRUE) %>% 
+  setNames(c("x", "y", "agri")) %>% 
+ggplot(data = ., aes(x = x, y = y, fill = agri)) +
+  geom_raster() +
+  scale_fill_gradientn(colours = terrain.colors(30, rev = TRUE)) +#,
+                       # breaks = c(0, 0.5, 1),
+                       # limits = c(0, 1)) +
+  geom_sf(data = states, alpha = 0.2,
+          fill = NA, col = "gray80", inherit.aes = FALSE) +
+  theme_minimal() +
+  coord_sf(crs = st_crs(gpa_data)) +
+  labs(x = "Longitude", y = "Latitude", fill = "Agriculture \nIntensity")
+g2
 
 
-
-
-
-
-
-
-
+g1 + g2
 
 
 
